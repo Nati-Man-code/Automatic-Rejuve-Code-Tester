@@ -110,4 +110,4 @@ jobs:
           echo "Adapters/changed config. Running tests for updated adapters."
           poetry run pytest --config config/test_config.yaml --writer $WRITER_TYPE
         else
-          echo "No significant changes detected. Skipping tests."
+          echo "No significant changes detected."
