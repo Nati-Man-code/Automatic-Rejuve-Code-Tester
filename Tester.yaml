@@ -64,7 +64,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.9'
+        python-version: [3.8, 3.9, 3.10]
     - name: Install PyYAML
       run: pip install PyYAML
     - name: Prepare Test Config
