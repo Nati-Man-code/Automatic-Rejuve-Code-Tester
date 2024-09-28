@@ -19,12 +19,6 @@ on:
 jobs:
   detect_changes:
     runs-on: ubuntu-latest
-    outputs:
-      changed_adapters: ${{ steps.detect_changes.outputs.changed_adapters }}
-      changed_writers: ${{ steps.detect_changes.outputs.changed_writers }}
-      changed_config: ${{ steps.detect_changes.outputs.changed_config }}
-      changed_main_script: ${{ steps.detect_changes.outputs.changed_main_script }}
-
     steps:
     - uses: actions/checkout@v3
     - name: Detect Changes
@@ -33,15 +27,34 @@ jobs:
         CHANGED_FILES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }})
         echo "Changed files: $CHANGED_FILES"
 
-        changed_adapters=$(echo "$CHANGED_FILES" | grep -q 'biocypher_metta/adapters/' && echo true || echo false)
-        changed_writers=$(echo "$CHANGED_FILES" | grep -q 'biocypher_metta/\(metta\|neo4j_csv\|prolog\)_writer.py' && echo true || echo false)
-        changed_config=$(echo "$CHANGED_FILES" | grep -q 'config/adapters_config_sample.yaml' && echo true || echo false)
-        changed_main_script=$(echo "$CHANGED_FILES" | grep -q 'create_knowledge_graph.py' && echo true || echo false)
+        if echo "$CHANGED_FILES" | grep -q 'biocypher_metta/adapters/'; then
+          changed_adapters=true
+        else
+          changed_adapters=false
+        fi
 
-        echo "::set-output name=changed_adapters::$changed_adapters"
-        echo "::set-output name=changed_writers::$changed_writers"
-        echo "::set-output name=changed_config::$changed_config"
-        echo "::set-output name=changed_main_scripts:$changed_main_script"
+        if echo "$CHANGED_FILES" | grep -q 'biocypher_metta/\(metta\|neo4j_csv\|prolog\)_writer.py'; then
+          changed_writers=true
+        else
+          changed_writers=false
+        fi
+
+        if echo "$CHANGED_FILES" | grep -q 'config/adapters_config_sample.yaml'; then
+          changed_config=true
+        else
+          changed_config=false
+        fi
+
+        if echo "$CHANGED_FILES" | grep -q 'create_knowledge_graph.py'; then
+          changed_main_script=true
+        else
+          changed_main_script=false
+        fi
+
+        echo "changed_adapters=$changed_adapters" >> $GITHUB_ENV
+        echo "changed_writers=$changed_writers" >> $GITHUB_ENV
+        echo "changed_config=$changed_config" >> $GITHUB_ENV
+        echo "changed_main_script=$changed_main_script" >> $GITHUB_ENV
 
   prepare_test_config:
     needs: detect_changes
@@ -56,49 +69,38 @@ jobs:
       run: pip install PyYAML
     - name: Prepare Test Config
       run: |
-        if [ "${{ needs.detect_changes.outputs.changed_adapters }}" == 'true' ] || [ "${{ needs.detect_changes.outputs.changed_config }}" == 'true' ]; then
+        if [ "${{ env.changed_adapters }}" == 'true' ] || [ "${{ env.changed_config }}" == 'true' ]; then
           echo "Generating updated test config..."
-          python .github/scripts/prepare_config.py "${{ needs.detect_changes.outputs.changed_adapters }}" "${{ needs.detect_changes.outputs.changed_config }}"
+          python .github/scripts/prepare_config.py "${{ env.changed_adapters }}" "${{ env.changed_config }}"
         else
           echo "No config or adapter changes detected. Using sample config."
           cp config/adapters_config_sample.yaml config/test_config.yaml
-    - uses: actions/upload-artifact@v3
-      with:
-        name: test-config
-        path: config/test_config.yaml
 
   run_tests:
     needs: [detect_changes, prepare_test_config]
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: true
       matrix:
-        writer_type: [metta, neo4j, prolog]
+        writer_type: [metta_writer, neo4j_writer, prolog_writer]
     steps:
     - uses: actions/checkout@v3
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.9'
-    - uses: actions/cache@v3
-      with:
-        path: |
-          ~/.cache/pip
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/poetry.lock') }}
-    - name: Install Dependencies
+        python-version: [3.8, 3.9, 3.10] #for multiple versions
+    - name: Install dependencies
       run: |
         pip install poetry
         poetry install
-    - uses: actions/download-artifact@v3
-      with:
-        name: test-config
-        path: config
     - name: Run Tests
       run: |
+        set -e
         WRITER_TYPE=${{ matrix.writer_type }}
-        CHANGED_CONFIG=${{ needs.detect_changes.outputs.config_changed }}
-        CHANGED_WRITERS=${{ needs.detect_changes.outputs.changed_writers }}
-        CHANGED_ADAPTERS=${{ needs.detect_changes.outputs.changed_adapters }}
-        CHANGED_MAIN_SCRIPT=${{ needs.detect_changes.outputs.changed_main_script }}
+        CHANGED_CONFIG=${{ env.changed_config }}
+        CHANGED_WRITERS=${{ env.changed_writers }}
+        CHANGED_ADAPTERS=${{ env.changed_adapters }}
+        CHANGED_MAIN_SCRIPT=${{ env.changed_main_script }}
 
         if [ "$CHANGED_MAIN_SCRIPT" == "true" ]; then
           echo "Main script changed. Running all tests with full sample config."
